@@ -4,6 +4,9 @@
 #include <Ticker.h>
 #include <AsyncMqttClient.h>
 
+// General
+#define SENSOR_ID 1
+
 // DHT Sensor
 #define DHT_BUS 4
 #define DHT_TYPE DHT11
@@ -20,8 +23,8 @@ DHT dht(DHT_BUS, DHT_TYPE);
 #define MQTT_USERNAME ""
 #define MQTT_PASSWORD ""
 
-// MQTT Topics
-#define TOPIC "/sensor"
+// Global buffer for MQTT topic
+char mqttTopic[50];
 
 // Wifi managers
 WiFiEventHandler wifiConnectHandler;
@@ -31,7 +34,12 @@ WiFiEventHandler wifiDisconnectHandler;
 Ticker wifiReconnectTimer;
 Ticker mqttReconnectTimer;
 
+// Clients
 AsyncMqttClient mqttClient;
+
+// State
+float previousTemperature = 0;
+float previousHumidity = 0;
 
 void connectToMqtt()
 {
@@ -57,8 +65,6 @@ void onWifiDisconnect(const WiFiEventStationModeDisconnected &event)
   wifiReconnectTimer.once(2, connectToWifi);
 }
 
-
-
 void onMqttConnect(bool sessionPresent)
 {
   Serial.println("Connected to MQTT.");
@@ -78,15 +84,34 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
 
 void onMqttPublish(uint16_t packetId)
 {
-Serial.print("Publish acknowledged.");
-Serial.print("PacketId: ");
-Serial.println(packetId);
+  Serial.print("Publish acknowledged.");
+  Serial.print("PacketId: ");
+  Serial.println(packetId);
+}
+
+void publishMqtt(float temperature, float humidity)
+{
+  char message[100];
+  sprintf(message, "{\"temperature\":%.1f, \"humidity\":%.1f}", temperature, humidity);
+  Serial.println(message);
+
+  bool result = mqttClient.publish(mqttTopic, 2, false, message);
+  if (!result)
+  {
+    Serial.printf("MQTT publish to topic %s failed\n", mqttTopic);
+  }
 }
 
 void setup()
 {
   Serial.begin(115200);
   Serial.println("Start");
+
+  // Create the MQTT topic dynamically
+  sprintf(mqttTopic, "sensor_%d/climate", SENSOR_ID);
+
+  Serial.print("MQTT Topic: ");
+  Serial.println(mqttTopic);
 
   dht.begin();
 
@@ -107,8 +132,15 @@ void loop()
   float temperature = dht.readTemperature();
   float humidity = dht.readHumidity();
 
-  Serial.println(temperature);
-  Serial.println(humidity);
+  if (!isnan(temperature) && !isnan(humidity))
+  {
+    if (temperature != previousTemperature || humidity != previousHumidity)
+    {
+      publishMqtt(temperature, humidity);
+      previousTemperature = temperature;
+      previousHumidity = humidity;
+    }
+  }
 
   delay(1000);
 }
